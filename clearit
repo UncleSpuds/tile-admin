@@ -1,0 +1,5 @@
+#!/bin/bash
+sudo rm -rf /var/www/mapproxy/data_fn/15_season1/NERC_Nashua/rgbtemp.vrt
+sudo rm -rf /var/www/mapproxy/data_fn/15_season1/NERC_Nashua/cirtemp.vrt
+sudo rm -rf /var/www/mapproxy/data_fn/15_season1/NERC_Nashua/gndvitemp.vrt
+

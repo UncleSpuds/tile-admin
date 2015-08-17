@@ -1,0 +1,273 @@
+#!/bin/bash
+RGBSwitches="-b 1 -b 2 -b 3"
+CIRSwitches="-b 4 -b 2 -b 1"
+RGBMosaic1="-of vrt -cutline"
+RGBMosaic2="-crop_to_cutline -dstalpha -multi"
+CIRMosaic1="-of vrt -cutline"
+CIRMosaic2="-crop_to_cutline -dstalpha -multi"
+ExtraNDVI1="-of vrt -expand rgb"
+NDVICut1="-of vrt -cutline"
+NDVICut2="-crop_to_cutline -dstalpha -multi"
+RGBTile1="-r bilinear -f hybrid"
+RGBProj1="EPSG:$projection"
+maxz="19"
+CIRTile1="-r bilinear -f hybrid"
+CIRProj1="EPSG:$projection"
+
+pause(){
+        read -p "Hit [ENTER] to go back to the previous menu.  I'll wait here..."
+}
+
+pause2() {
+	read -p "Hit [ENTER] to start tiling, or Q to Exit...."
+}
+
+pause3() {
+	read -p "Hit [ENTER] to manage mosaic cutting commands...."
+}
+
+get-max-z() {
+clear
+echo "What is the maximum zoom level you would like to tile?"
+echo ""
+echo "Explanation of Zoom Levels Here"
+echo ""
+echo -n "Please enter the maximum zoom level> "
+read maxz
+echo -e ""
+read -p "Use maximum zoom level $maxz ?"
+ if [[  ! $REPLY =~ ^[Yy]$ ]]; then
+	printf "\nRestarting....\n"
+	sleep 1
+	get-max-z;
+	else
+	printf "\nContinuing...\n"
+	sleep 1
+	tile-rgb-then-cir-then-ndvi;
+fi
+}
+
+
+get-project-projection() {
+clear
+echo -e "Please provide the projection for $SITENAME, using only the NUMBERS"
+echo -e ""
+echo -e "Example: 3417"
+echo -e ""
+echo -n "Enter the projection here> "
+read projection
+echo -e ""
+read -p "Use projection EPSG:"$projection" ?"
+ if [[  ! $REPLY =~ ^[Yy]$ ]]; then
+	printf "\nRestarting....\n"
+	sleep 1
+	get-project-projection;
+	else
+	printf "\nContinuing...\n"
+	sleep 1
+	get-max-z;
+fi
+}
+
+tile-rgb-then-cir-then-ndvi() {
+clear
+echo -e "In this step, the script will put jobs into SCREEN mode.  You will need to"
+echo -e "understand how to operate SCREEN in order to monitor jobs."
+echo -e ""
+echo -e "Disconnect from a screen    :  Press and hold CTRL and press A then D"
+echo -e "Move to the next screen     :"
+echo -e "See a menu of active screens:"
+echo -e ""
+echo -e ""
+screen -dmS "$SITENAME"_RGB bash -c "cd /var/www/mapproxy; sudo python /usr/local/bin/mapslicer.py -r bilinear -f hybrid -s EPSG:$projection -z 0-$maxz data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/"$rgbtilepath"/rgbtemp.vrt tiles/$client/"$SITENAME"_rgb"
+screen -dmS "$SITENAME"_CIR bash -c "cd /var/www/mapproxy; sudo python /usr/local/bin/mapslicer.py -r bilinear -f hybrid -s EPSG:$projection -z 0-$maxz data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/"$rgbtilepath"/cirtemp.vrt tiles/$client/"$SITENAME"_cir"
+screen -dmS "$SITENAME"_NDVI bash -c "cd /var/www/mapproxy; sudo python /usr/local/bin/mapslicer.py -r bilinear -f hybrid -s EPSG:$projection -z 0-$maxz data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/"$rgbtilepath"/gndvitemp.vrt tiles/$client/"$SITENAME"_gndvi"
+}
+
+edit-ndvi-tiling() {
+tile-rgb-then-cir-then-ndvi;
+}
+
+edit-cir-tiling() {
+	edit-ndvi-tiling;
+}
+
+
+edit-rgb-tiling() {
+clear
+echo -e "In this step, you will edit the RGB tiling command, if necessary."
+echo -e ""
+echo -e "Current RGB Tiling Command:"
+echo -e "sudo python /usr/local/bin/mapslicer.py $RGBTile1 -s $RGBProj1 -z 0-$maxz data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/$SITENAME/rgbtemp.vrt tiles/fn/"$SITENAME"_rgb"
+echo -e ""
+echo -e "1) Change $RGBTile1"
+echo -e "2) Change Projection type"
+echo -e "3) Change Max Zoom"
+echo -e "4) Move on to CIR Edit Menu"
+echo -e ""
+echo -n "Enter your selection here> "
+rgbeditmenu;
+}
+
+rgbtilingmenu() {
+read selection
+case $selection in
+        1) echo "Changing Mapslicer Switches";
+                read -p "What would you like to change the mapslicer switches to? "
+                RGBTile1=$REPLY;
+                edit-rgb=tiling;
+                ;;
+        2) echo "Changing second mosaic switches....";
+                read -p "What would you like to change the second mosaic switches to? "
+                RGBMosaic2=$REPLY;
+                edit-rgb=tiling;
+                ;;
+	3) read -p "What would you like the new max zoom level to be?"
+		maxz=$REPLY
+                edit-rgb=tiling;
+                ;;
+        4) echo "Moving on to CIR tiling Edit Menu..."
+                edit-cir-tiling;
+                ;;
+        *) echo -e "Where are your manners?  Choose a correct entry.  $REPLY is not a valid choice."
+                rgbtilingmenu;
+                ;;
+esac
+}
+
+
+cut-data-to-shapefiles() {
+clear
+cd /var/www/mapproxy
+pwd
+echo -e "In this step, we will cut all RGB, CIR and NDVI data to the shapefile."
+echo -e ""
+echo -e "All of the options should have been edited in the previous steps."
+echo -e ""
+echo -e "Cutting RGB Data to shapefile using command: "
+echo -e "sudo gdalwarp $RGBMosaic1 data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/shp/$shapefilename $RGBMosaic2 data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/$SITENAME/rgb.vrt data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/$SITENAME/rgbtemp.vrt"
+echo -e ""
+cd /var/www/mapproxy
+sudo gdalwarp $RGBMosaic1 data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/shp/$shapefilename $RGBMosaic2 data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/$SITENAME/rgb.vrt data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/$SITENAME/rgbtemp.vrt
+echo -e "Cutting CIR Data to shapefile using command: "
+echo -e "sudo gdalwarp $CIRMosaic1 data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/shp/$shapefilename $CIRMosaic2 data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/$SITENAME/cir.vrt data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/$SITENAME/cirtemp.vrt"
+echo -e ""
+cd /var/www/mapproxy
+sudo gdalwarp $CIRMosaic1 data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/shp/$shapefilename $CIRMosaic2 data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/$SITENAME/cir.vrt data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/$SITENAME/cirtemp.vrt
+echo -e "Cutting NDVI Data to shapefile using command: "
+echo -e "sudo gdalwarp $NDVICut1 data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/shp/$shapefilename $NDVICut2 data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/$SITENAME/gndvitr.vrt data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/$SITENAME/gndvitemp.vrt"
+echo -e ""
+cd /var/www/mapproxy
+sudo gdalwarp $NDVICut1 data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/shp/$shapefilename $NDVICut2 data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/$SITENAME/gndvitr.vrt data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/$SITENAME/gndvitemp.vrt
+edit-rgb-tiling;
+}
+
+
+ndvi-mosaic-edit() {
+clear
+echo -e "In this step, you will edit the NDVI shapefile cutting command, if necessary."
+echo -e ""
+echo -e "Current NDVI Shapefile Cut Command:"
+echo -e "sudo gdalwarp $NDVICut1 data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/shp/$shapefilename $NDVICut2 data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/rgb.vrt data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/rgbtemp.vrt"
+echo -e ""
+echo -e "1) Change $NDVICut1"
+echo -e "2) Change $NDVICut2"
+echo -e "3) Cut Data to Shapefiles"
+echo -e ""
+echo -n "Enter your selection here> "
+ndvieditmenu;
+}
+
+ndvieditmenu() {
+read selection
+case $selection in
+        1) echo "Changing first mosaic switches....";
+                read -p "What would you like to change the first mosaic switches to? "
+                NDVICut1=$REPLY;
+                ndvi-mosaic-edit;
+                ;;
+        2) echo "Changing second mosaic switches....";
+                read -p "What would you like to change the second mosaic switches to? "
+                NDVICut2=$REPLY;
+                ndvi-mosaic-edit;
+                ;;
+        3) echo "Moving on to cut data to shapefiles..."
+                cut-data-to-shapefiles;
+                ;;
+        *) echo -e "Where are your manners?  Choose a correct entry.  $REPLY is not a valid choice."
+                ndvieditmenu;
+                ;;
+esac
+}
+
+
+
+cir-mosaic-edit() {
+clear
+echo -e "In this step, you will edit the CIR shapefile cutting command, if necessary."
+echo -e ""
+echo -e "Current CIR Shapefile Cut Command:"
+echo -e "sudo gdalwarp $CIRMosaic1 data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/shp/$shapefilename $CIRMosaic2 data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/rgb.vrt data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/rgbtemp.vrt"
+echo -e ""
+echo -e "1) Change $CIRMosaic1"
+echo -e "2) Change $CIRMosaic2"
+echo -e "3) Move on to NDVI Edit Menu"
+echo -e ""
+echo -n "Enter your selection here> "
+cireditmenu;
+}
+
+cireditmenu() {
+read selection
+case $selection in
+        1) echo "Changing first mosaic switches....";
+                read -p "What would you like to change the first mosaic switches to? "
+                CIRMosaic1=$REPLY;
+                cir-mosaic-edit;
+                ;;
+        2) echo "Changing second mosaic switches....";
+                read -p "What would you like to change the second mosaic switches to? "
+                CIRMosaic2=$REPLY;
+                cir-mosaic-edit;
+                ;;
+        3) echo "Moving on to NDVI Edit Menu..."
+                ndvi-mosaic-edit;
+                ;;
+        *) echo -e "Where are your manners?  Choose a correct entry.  $REPLY is not a valid choice."
+                cireditmenu;
+                ;;
+esac
+}
+
+
+rgb-mosaic-edit() {
+clear
+echo -e "In this step, you will edit the RGB shapefile cutting command, if necessary."
+echo -e ""
+echo -e "Current RGB Shapefile Cut Command:"
+echo -e "sudo gdalwarp $RGBMosaic1 data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/shp/$shapefilename $RGBMosaic2 data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/rgb.vrt data_$client/"$PROJECTYEAR"_season"$PROJECTSEASON"/rgbtemp.vrt"
+echo -e ""
+echo -e "1) Change $RGBMosaic1"
+echo -e "2) Change $RGBMosaic2"
+echo -e "3) Move on to CIR Edit Menu"
+echo -e ""
+echo -n "Enter your selection here> "
+rgbeditmenu;
+}
+
+rgbeditmenu() {
+read selection
+case $selection in
+        1) echo "Changing first mosaic switches....";
+                read -p "What would you like to change the first mosaic switches to? "
+                RGBMosaic1=$REPLY;
+                rgb-mosaic-edit;
+                ;;
+        2) echo "Changing second mosaic switches....";
+                read -p "What would you like to change the second mosaic switches to? "
+                RGBMosaic2=$REPLY;
+                rgb-mosaic-edit;
+                ;;
+	3) echo "Moving on to CIR Edit Menu..."
+		cir-mosaic-edit;
+		;;
