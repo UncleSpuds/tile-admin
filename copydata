@@ -1,0 +1,942 @@
+#!/bin/bash
+
+####
+#
+# Generate a jobID in case one is not specified later
+#
+####
+jobid=$(date +%s)
+
+####
+#
+# Flush out the variables
+#
+####
+
+fullfilepath=""
+origfilepath=""
+modifiedepsg=""
+epsgproj=""
+writeoutput=""
+basepath=""
+tempfilepath=""
+tilefolderpath=""
+maxz=""
+
+
+# Some routines to stop the output to have a look or halt the script.
+#
+# pause - pauses, gives you an unlimited amount of time to wait.
+#
+# halt - stops the script.  Useful to end the script before an unfinished
+#        section of code.  EXITS the program.
+#
+# showjobid - Shows your job ID so you don't forget.  A lot.
+#
+
+pause(){
+        read -p "Hit [ENTER] to continue..."
+}
+
+halt() {
+        echo "HALT.  Purposeful Script End, Debug."
+        exit
+}
+
+showjobid() {
+        echo "Your job ID is: $jobid"
+        echo ""
+}
+
+define-epsg-manually() {
+echo ""
+echo ""
+echo "Please manually provide the EPSG code you would like to use for tiling."
+echo ""
+echo "Enter the numeric value for EPSG and then hit ENTER"
+echo ""
+read -p  "What EPSG code would you like to use?  >  " $epsgproj
+modifiedepsg="Y"
+}
+
+
+forcechangeepsg() {
+echo ""
+read -p "Please enter the EPSG Code.  NUMBERS ONLY, please.  Then hit ENTER. > "
+if [ $REPLY = "" ]; then
+        echo "Please try again."
+        echo ""
+        forcechangeepsg
+else
+epsgproj=$REPLY
+echo ""
+modifiedepsg="Y"
+echo ""
+fi
+}
+
+
+changeepsg() {
+echo ""
+echo ""
+read -p "Do you want to change the reference system? (Y/N) > " -n1
+case $REPLY in
+        Y) echo "";
+                echo "";
+                echo "Numbers only, then hit ENTER";
+                echo "";
+                read -p "Please enter the EPSG Code: " epsgproj;
+                modifiedepsg="Y"
+                echo "";;
+        y) echo "";
+                echo "";
+                echo "Numbers only, then hit ENTER";
+                echo "";
+                read -p "Please enter the EPSG Code: " epsgproj;
+                modifiedepsg="Y"
+                echo "";;
+        N) echo "";
+                modifiedepsg=N;;
+        n) echo "";
+                modifiedepsg=N;;
+        *) echo "Try something else, this isn't working."
+esac
+}
+
+####
+#
+# checkfortilinginfo()
+# Checks to see if there is a tilinginfo.dat file
+# Gives opportunity to overwrite.
+#
+####
+
+checkfortilinginfo() {
+if [ -e "$fullfilepath"/tilinginfo.dat ]; then
+        echo "A tilinginfo.dat file appears in this directory."
+        echo "You have three options here:  Quit, Overwrite, or Keep the file."
+        echo ""
+        read -p "Quit, Overwrite, or Keep? (Q/O/K) > " -n1
+case $REPLY in
+        Q) echo "Exiting...";
+                exit;;
+        q) echo "Exiting...";
+                exit;;
+        O) echo "Overwriting...";
+                rm -rf "$fullfilepath"/tilinginfo.dat;
+                writeoutput="Y";;
+        o) echo "Overwriting...";
+                rm -rf "$fullfilepath"/tilinginfo.dat;
+                writeoutput="Y";;
+        K) echo "Keeping, continuing...";
+                writeoutput="N";;
+        k) echo "Keeping, continuing...";
+                writeoutput="N";;
+        *) echo "Please enter [O]verwrite, [Q]uit, or [K]keep";
+                checkfortilinginfo;;
+esac
+else
+        echo ""
+fi
+}
+
+
+###
+#
+# getbasedir()
+# How we differentiate between the Isilon and new storage
+#
+###
+getbasedir() {
+showjobid
+echo "On which drive is the data to be tiled?"
+echo ""
+echo "1) P:\\Isilon\\"
+echo "2) P:\\Vol_1\\"
+echo ""
+echo "Q) Quit"
+echo ""
+read -p "Make your selection here:  (1 or 2) >" -n1
+echo ""
+case $REPLY in
+        1) echo "P:\\Isilon\\ has been selected."
+                basepath=/var/mapproxy/isilon/
+                getfullpathnow;
+                ;;
+        2) echo "P:\\Vol_1\\ has been selected."
+                basepath=/var/mapproxy/vol1/
+                getfullpathnow;
+                ;;
+        Q) echo "Exiting..."
+                exit
+                ;;
+        q) echo "Exiting..."
+                exit
+                ;;
+        *) echo "A proper selection is required."
+                getbasedir;
+                ;;
+esac
+getfullpathnow;
+}
+
+
+
+####
+#
+# getfullpathnow()
+# Get the rest of the path now that we know which device we are grabbing data from.
+#
+####
+getfullpathnow() {
+showjobid
+echo "Now I will need the full path to the FOLDER that contains the TIF and other"
+echo "project files.  You ***SHOULD NOT*** paste in the drive letter, just everything"
+echo "after the drive letter."
+echo ""
+echo "Example:  P:\Vol_1\Data\NewProject   should be expressed as: Data\NewProject"
+echo "as the script ASSUMES that you will be pulling data from P:\\Isilon\\  or P:\\Vol_1\\"
+echo "depending on your previous choices."
+echo ""
+echo "IMPORTANT HINTS:"
+echo ""
+echo "NO Leading Slashes  --  Example: _ASI_Projects/something/somethingelse"
+echo ""
+echo "WARNING:  NO SPACES - NO SPACES - NO SPACES - NO SPACES IN THE PATH"
+echo ""
+read -rp "What is the path to the folder to be tiled? " tilefolderpath
+
+###
+#Here, we turn the windows paths into Linux paths
+###
+
+tempfilepath="$basepath""$tilefolderpath"
+fullfilepath=$(echo $tempfilepath | sed 's/\\/\//g')
+origfilepath=$fullfilepath
+
+###
+#End turning windows paths to Linux paths
+###
+
+if [ -e "$fullfilepath" ]; then
+        echo ""
+        jobcontinue;
+        rgbdatcheck;
+else
+        echo ""
+        echo ""
+        echo "Sorry, this path could not be found.  Please ensure you have no extra"
+        echo "characters, spaces, or slashes in your input."
+        echo ""
+        pause;
+        getfullpathnow;
+fi
+}
+
+####
+#
+# jobcontinue()
+# Find out if the user wants to continue a job.
+#
+# Copydata v0.whatever would create a new jobID for each session.
+# In addition, it would copy the ENTIRE data structure each time.
+#
+# This version gives the user a chance to enter an old JobID and
+# only copy the NEW data across.
+#
+##
+
+
+jobcontinue() {
+echo ""
+echo "Send new data to an existing JobID?"
+echo ""
+echo "If data has already been pushed over, and you have a JobID, and you have new"
+echo "data for that job, enter the JobID at the prompt, or ENTER to start a new"
+echo "batch."
+echo ""
+read -p "JobID or [ENTER]: "
+if [ "$REPLY" = "" ]; then
+        rgbdatcheck;
+else
+        jobid=$REPLY
+        rgbdatcheck;
+fi
+}
+
+
+####
+#
+# shapefiletest()
+# Tests to see if a shapefile is present, nothing else.
+#
+##
+shapefiletest() {
+echo "Performing test to see if a shapefile is present..."
+if [ -e $origfilepath/shp/*.shp ]; then
+        echo "Shapefile Found.  Continuing tests...."
+else
+        echo "Shapefile NOT Found.  You must fix this to continue."
+        pause;
+        exit
+fi
+echo ""
+}
+
+rgbdatcheck() {
+if [ -d $origfilepath/RGB/ ]; then
+if [ -e $origfilepath/RGB/tilinginfo.dat ]; then
+        echo "Detected *RGB* directory.  Previous tilinginfo.dat detected.  Skipping *RGB* Data Auth"
+                echo ""
+                echo "You can [K]eep the current RGB tilinginfo.dat file and skip data authorization,"
+                echo "or you can [D]elete the tilinginfo.dat file and answer the questions to recreate it."
+                echo ""
+                read -p "Would you like to [K]eep or [D]elete the RGB tilinginfo.dat? (K/D) > " -n1
+                echo ""
+                case $REPLY in
+                        K) echo "Continuing...."
+                                testforrndvidat;;
+                        k) echo "Continuing...."
+                                testforrndvidat;;
+                        D) echo "Deleted..."
+                                rm -rf $origfilepath/RGB/tilinginfo.dat
+                                sleep 1
+                                rgbcreatedat;;
+                        d) echo "Deleted..."
+                                rm -rf $origfilepath/RGB/tilinginfo.dat
+                                sleep 1
+                                rgbcreatedat;;
+                        *) echo "Please make a proper selection...."
+                                testforrndvidat;;
+                esac
+
+else
+        rgbcreatedat
+fi
+else
+        testforrndvidat
+fi
+}
+
+rgbcreatedat() {
+clear
+fullfilepath="$origfilepath/RGB/"
+echo "Creating tilinginfo.dat file for RGB Product...."
+sleep 1
+        rundataauth;
+        getgsdandcalcmaxz;
+        getbandassignments;
+        outputtofile;
+        testforrndvidat;
+}
+
+testforrndvidat() {
+if [ -d "$origfilepath"/rNDVI/ ]; then
+if [ -e "$origfilepath"/rNDVI/tilinginfo.dat ]; then
+        echo "Detected rNDVI directory.  Previous tilinginfo.dat detected."
+                echo ""
+                echo "You can [K]eep the current rNDVI tilinginfo.dat file and skip data authorization,"
+                echo "or you can [D]elete the tilinginfo.dat file and answer the questions to recreate it."
+                echo ""
+                read -p "Would you like to [K]eep or [D]elete the rNDVI tilinginfo.dat? (K/D) > " -n1
+                echo ""
+                case $REPLY in
+                        K) echo "Continuing...."
+                                testforgndvidat;;
+                        k) echo "Continuing...."
+                                testforgndvidat;;
+                        D) echo "Deleted..."
+                                rm -rf $origfilepath/rNDVI/tilinginfo.dat
+                                sleep 1
+                                rndvicreatedat;;
+                        d) echo "Deleted..."
+                                rm -rf $origfilepath/rNDVI/tilinginfo.dat
+                                sleep 1
+                                rndvicreatedat;;
+                        *) echo "Please make a proper selection...."
+                                testforrndvidat;;
+                esac
+else
+        rndvicreatedat
+fi
+else
+        testforgndvidat
+fi
+}
+
+rndvicreatedat() {
+clear
+fullfilepath="$origfilepath/rNDVI/"
+echo "Creating tilinginfo.dat file for rNDVI Product...."
+sleep 1
+        rundataauth;
+        getgsdandcalcmaxz;
+        getbandassignments;
+        outputtofile;
+        testforgndvidat;
+}
+
+testforgndvidat() {
+if [ -d $origfilepath/gNDVI/ ]; then
+        if [ -e $origfilepath/gNDVI/tilinginfo.dat ]; then
+                echo "Detected gNDVI directory.  Previous tilinginfo.dat detected."
+                echo ""
+                echo "You can keep the current gNDVI tilinginfo.dat file and skip data authorization,"
+                echo "or you can [D]elete the tilinginfo.dat file and answer the questions to recreate it."
+                echo ""
+                read -p "Would you like to [K]eep or [D]elete the gNDVI tilinginfo.dat? (K/D) > " -n1
+                echo ""
+                case $REPLY in
+                        K) echo "Continuing...."
+                                testforthermaldat;;
+                        k) echo "Continuing...."
+                                testforthermaldat;;
+                        D) echo "Deleted..."
+                                rm -rf $origfilepath/gNDVI/tilinginfo.dat
+                                sleep 1
+                                gndvicreatedat;;
+                        d) echo "Deleted..."
+                                rm -rf $origfilepath/gNDVI/tilinginfo.dat
+                                sleep 1
+                                gndvicreatedat;;
+                        *) echo "Please make a proper selection...."
+                                testforgndvidat;;
+                esac
+        else
+                gndvicreatedat
+        fi
+else
+        testforthermaldat
+fi
+}
+
+gndvicreatedat() {
+clear
+fullfilepath="$origfilepath/gNDVI/"
+echo "Creating tilinginfo.dat file for gNDVI product...."
+sleep 1
+        rundataauth;
+        getgsdandcalcmaxz;
+        getbandassignments;
+        outputtofile;
+        testforthermaldat;
+}
+
+testforthermaldat() {
+if [ -d $origfilepath/Thermal/ ]; then
+        if [ -e $origfilepath/Thermal/tilinginfo.dat ]; then
+                echo "Detected Thermal directory.  Previous tilinginfo.dat found."
+                echo ""
+                echo "You can keep the current Thermal tilinginfo.dat file and skip data authorization,"
+                echo "or you can [D]elete the tilinginfo.dat file and answer the questions to recreate it."
+                echo ""
+                read -p "Would you like to [K]eep or [D]elete the Thermal tilinginfo.dat? (K/D) > " -n1
+                echo ""
+                case $REPLY in
+                        K) echo "Continuing...."
+                                checkformove;;
+                        k) echo "Continuing...."
+                                checkformove;;
+                        D) echo "Deleted..."
+                                rm -rf $origfilepath/Thermal/tilinginfo.dat
+                                sleep 1
+                                thermalcreatedat;;
+                        d) echo "Deleted..."
+                                rm -rf $origfilepath/Thermal/tilinginfo.dat
+                                sleep 1
+                                thermalcreatedat;;
+                        *) echo "Please make a proper selection...."
+                                testforthermaldat;;
+                esac
+        else
+                thermalcreatedat
+fi
+else
+                checkformove
+fi
+}
+
+
+thermalcreatedat() {
+clear
+fullfilepath="$origfilepath/Thermal/"
+echo "Creating tilinginfo.dat file for Thermal Product...."
+sleep 1
+        rundataauth;
+        getgsdandcalcmaxz;
+        getbandassignments;
+        outputtofile;
+        checkformove;
+}
+
+
+####
+#
+# rundataauth()
+# Runs authorization routines as described in the echoed text below
+#
+####
+
+rundataauth() {
+showjobid
+echo "Now I am going to attempt to authorize your data.  The following checks will"
+echo "be performed:"
+echo ""
+echo "1) Check to make sure there is a shape file in the directory (if required)."
+echo "2) Check to make sure there is a UNIQUE Spatial Reference associated with each file."
+echo "3) Check to make sure there is a UNIQUE GSD associated with each file."
+echo ""
+echo ""
+read -p "Does this project require a shapefile?  (Y/N): " -n1
+echo ""
+case $REPLY in
+        Y) shapefiletest;;
+        y) shapefiletest;;
+        N) echo "Bypassing shapefile test.";;
+        n) echo "Bypassing shapefile test.";;
+        Q) exit;;
+        q) exit;;
+        *) echo "Choose Y or N";
+                rundataauth;;
+esac
+
+echo "Performing Spatial Reference Test on each input file in the base path..."
+cd $fullfilepath
+for i in $(ls *.tif); do
+epsgproj=$(gdalinfo $i | grep "Coordinate System" -A1 | awk -F '"' '{print $2}' )
+        echo $epsgproj >> /tmp/fileprojectionlist.txt
+                echo item: $i Has This in the file: $epsgproj
+done
+
+numprojections=$(cat /tmp/fileprojectionlist.txt | sort | uniq | wc -l)
+
+if [ $numprojections = "0" ]; then
+echo "No projections are embedded for input files."
+echo ""
+echo "You will need to set a projection for this tiling project."
+changeepsg
+fi
+
+if [ $numprojections -eq 1 ] && [ ! -z $epsgproj ]; then
+detectedprojection=$(cat /tmp/fileprojectionlist.txt | sort | uniq)
+echo "Here is the Spatial Reference System I detected: $detectedprojection"
+rm -r /tmp/fileprojectionlist.txt
+changeepsg;
+pause
+fi
+
+if [ $numprojections -eq 1 ] && [ -z $modifiedepsg ]; then
+echo "No projections are embedded for input files."
+echo ""
+echo "You will need to set a projection for this tiling project."
+forcechangeepsg
+fi
+
+if [ $numprojections -eq 1 ] && [ ! -z $modifiedepsg ]; then
+echo "Continuing..."
+else
+sleep .01
+fi
+
+if [ $numprojections -gt 1 ]; then
+echo "The input files contained multiple Spacial Reference Systems:"
+echo ""
+cat /tmp/fileprojectionlist.txt | sort | uniq
+echo ""
+echo "Please define a projection to use for tiling."
+rm -f /tmp/fileprojectionlist.txt
+changeepsg
+fi
+}
+
+
+####
+#
+# getgsdandcalcmaxz()
+# Asks to define the resolution of the images in Feet, Meters, Inches or Centimeters
+#
+####
+
+getgsdandcalcmaxz() {
+clear
+echo "Please enter the resolution / GSD of the imagery.  This will be used to"
+echo "calculate the maximum number of zoom levels to process."
+echo ""
+echo "I will ask two questions:  1) Measurement Unit  and 2) How many units"
+echo ""
+echo "Example:  1)  Meters       2) .304"
+echo "Example:  1)  Inches       2) 12"
+echo "Example:  1)  Feet         2) 1"
+echo "Example:  1)  Centimeters  2) 30.48"
+echo ""
+read -p "What Measurement Unit? (m)eters, (i)nches, (f)eet, (c)entimeters:  " -n1
+echo ""
+case $REPLY in
+        M) read -p "How many units? ";
+        if [ "$REPLY" = "" ]; then
+                echo ""
+                echo ""
+                echo "You must specify the number of units for this measurement."
+                sleep 2
+                getgsdandcalcmaxz;
+        else
+                calculatedgsd=$REPLY;
+                setmaxz
+        fi;;
+        m) read -p "How many units? ";
+        if [ "$REPLY" = "" ]; then
+                echo ""
+                echo ""
+                echo "You must specify the number of units for this measurement."
+                sleep 2
+                getgsdandcalcmaxz;
+        else
+                calculatedgsd=$REPLY;
+                setmaxz
+        fi;;
+        I)  read -p "How many units? ";
+        if [ "$REPLY" = "" ]; then
+                echo ""
+                echo ""
+                echo "You must specify the number of units for this measurement."
+                sleep 2
+                getgsdandcalcmaxz;
+        else
+                calculatedgsd=$(echo "$REPLY/39.370" | bc -l);
+                setmaxz
+        fi;;
+        i)  read -p "How many units? ";
+        if [ "$REPLY" = "" ]; then
+                echo ""
+                echo ""
+                echo "You must specify the number of units for this measurement."
+                sleep 2
+                getgsdandcalcmaxz;
+        else
+                calculatedgsd=$(echo "$REPLY/39.370" | bc -l);
+                setmaxz
+        fi;;
+        F) read -p "How many units? ";
+        if [ "$REPLY" = "" ]; then
+                echo ""
+                echo ""
+                echo "You must specify the number of units for this measurement."
+                sleep 2
+                getgsdandcalcmaxz;
+        else
+                calculatedgsd=$(echo "$REPLY/3.2808" | bc -l );
+                setmaxz
+        fi;;
+        f) read -p "How many units? ";
+        if [ "$REPLY" = "" ]; then
+                echo ""
+                echo ""
+                echo "You must specify the number of units for this measurement."
+                sleep 2
+                getgsdandcalcmaxz;
+        else
+                calculatedgsd=$(echo "$REPLY/3.2808" | bc -l );
+                setmaxz
+        fi;;
+        C) read -p "How many units? ";
+        if [ "$REPLY" = "" ]; then
+                echo ""
+                echo ""
+                echo "You must specify the number of units for this measurement."
+                sleep 2
+                getgsdandcalcmaxz;
+        else
+                calculatedgsd=$(echo "$REPLY*.01" | bc -l);
+                setmaxz
+        fi;;
+        c) read -p "How many units? ";
+        if [ "$REPLY" = "" ]; then
+                echo ""
+                echo ""
+                echo "You must specify the number of units for this measurement."
+                sleep 2
+                getgsdandcalcmaxz;
+        else
+                calculatedgsd=$(echo "$REPLY*.01" | bc -l);
+                setmaxz
+        fi;;
+        Q) echo "Exiting....";
+                exit;;
+        q) echo "Exiting....";
+                exit;;
+        *) echo "You didn't enter M or m or I or i or F or f or C or C.";
+                echo "";
+                echo "Silly.";
+                echo "";
+                echo "Please try again.";
+                pause;
+                getgsdandcalcmaxz;;
+esac
+
+}
+
+
+####
+#
+# setmaxz()
+# Uses a table to determine maxz from answers to measurment and unit questions
+#
+####
+
+setmaxz() {
+if (( $(bc <<< "$calculatedgsd > 0.0200") == 1 )) && (( $(bc <<< "$calculatedgsd <= 0.0382") == 1 )); then
+maxz=22
+fi
+
+if (( $(bc <<< "$calculatedgsd > 0.0382") == 1 )) && (( $(bc <<< "$calculatedgsd <= 0.0780 ") == 1 )); then
+maxz=21
+fi
+
+if (( $(bc <<< "$calculatedgsd > 0.0780") == 1 )) && (( $(bc <<< "$calculatedgsd <= 0.1540") == 1 )); then
+maxz=20
+fi
+
+if (( $(bc <<< "$calculatedgsd > 0.1540") == 1 )) && (( $(bc <<< "$calculatedgsd <= 0.3060") == 1 )); then
+maxz=19
+fi
+
+if (( $(bc <<< "$calculatedgsd > 0.3060") == 1 )) && (( $(bc <<< "$calculatedgsd <= 0.6100") == 1 )); then
+maxz=18
+fi
+
+if (( $(bc <<< "$calculatedgsd > 0.6100") == 1 )) && (( $(bc <<< "$calculatedgsd <= 1.2200") == 1 )); then
+maxz=17
+fi
+
+if (( $(bc <<< "$calculatedgsd > 1.2200") == 1 )) && (( $(bc <<< "$calculatedgsd <= 2.2000") == 1 )); then
+maxz=16
+fi
+
+echo ""
+echo "MaxZ is: $maxz"
+echo ""
+echo "Ready to determine band assignments."
+echo ""
+pause
+}
+
+####
+#
+# getbandassignments()
+# Uses gdalinfo to determine NUMBER of bands, and TRIES to determine what the band is
+#
+####
+
+getbandassignments() {
+cd $fullfilepath
+clear
+showjobid
+for i in $(ls *.tif); do
+totalbands=$(gdalinfo $i | grep "Band" | sort | uniq | wc -l)
+done
+
+echo "There are $totalbands bands in this selection."
+echo ""
+
+
+for i in $(ls *.tif); do
+bandone=$(gdalinfo $i | grep "Band 1" | awk '{print $5}' | sed -e 's:.*=::')
+echo item: $i has Band 1 set to: $bandone >> /tmp/filesbandone.txt
+done
+
+numbandone=$(cat /tmp/filesbandone.txt | awk '{print $8}' | sort | uniq | wc -l)
+
+if [ $numbandone = "1" ]; then
+        echo "Band One is : $bandone and is homogenous across all files."
+        rm -f /tmp/filesbandone.txt
+else
+        echo "Band One is not homogenous across files.  Preparation cannot continue."
+        echo "Please make sure that all files have the same colors for each band."
+        echo ""
+        echo "This preparation will now exit."
+        echo ""
+        rm -f /tmp/filesbandone.txt
+        exit
+fi
+
+for i in $(ls *.tif); do
+bandtwo=$(gdalinfo $i | grep "Band 2" | awk '{print $5}' | sed -e 's:.*=::')
+echo item: $i has Band 2 set to: $bandtwo >> /tmp/filesbandtwo.txt
+done
+
+numbandtwo=$(cat /tmp/filesbandtwo.txt | awk '{print $8}' | sort | uniq | wc -l)
+
+if [ $numbandtwo = "1" ]; then
+        echo "Band Two is : $bandtwo and is homogenous across all files."
+        rm -f /tmp/filesbandtwo.txt
+else
+        echo "Band Two is not homogenous across files.  Preparation cannot continue."
+        echo "Please make sure that all files have the same colors for each band."
+        echo ""
+        echo "This preparation will now exit."
+        echo ""
+        rm -f /tmp/filesbandtwo.txt
+        exit
+fi
+
+for i in $(ls *.tif); do
+bandthree=$(gdalinfo $i | grep "Band 3" | awk '{print $5}' | sed -e 's:.*=::')
+echo item: $i has Band 3 set to: $bandthree >> /tmp/filesbandthree.txt
+done
+
+
+numbandthree=$(cat /tmp/filesbandthree.txt | awk '{print $8}' | sort | uniq | wc -l)
+
+if [ $numbandthree = "1" ]; then
+        echo "Band Three is : $bandthree and is homogenous across all files."
+        rm -f /tmp/filesbandthree.txt
+else
+        echo "Band Three is not homogenous across files.  Preparation cannot continue."
+        echo "Please make sure that all files have the same colors for each band."
+        echo ""
+        echo "This preparation will now exit."
+        echo ""
+        rm -f /tmp/filesbandthree.txt
+        exit
+fi
+
+for i in $(ls *.tif); do
+bandfour=$(gdalinfo $i | grep "Band 4" | awk '{print $5}' | sed -e 's:.*=::')
+echo item: $i has Band 4 set to: $bandfour >> /tmp/filesbandfour.txt
+done
+
+
+numbandfour=$(cat /tmp/filesbandfour.txt | awk '{print $8}' | sort | uniq | wc -l)
+
+if [ $numbandfour = "1" ]; then
+        echo "Band Four is : $bandfour and is homogenous across all files."
+        rm -f /tmp/filesbandfour.txt
+else
+        echo "Band Four is not homogenous across files.  Preparation cannot continue."
+        echo "Please make sure that all files have the same colors for each band."
+        echo ""
+        echo "This preparation will now exit."
+        echo ""
+        rm -f /tmp/filesbandfour.txt
+        exit
+fi
+
+pause
+}
+
+
+####
+#
+# outputtofile()
+# Writes the tilinginfo.dat file
+#
+####
+
+
+outputtofile() {
+clear
+if [ "$writeoutput" = "N" ]; then
+        echo ""
+else
+printf '%s\r\n' "$jobid" >> $fullfilepath/tilinginfo.dat
+printf '%s\r\n' "$totalbands" >> $fullfilepath/tilinginfo.dat
+printf '%s\r\n' "$bandone" >> $fullfilepath/tilinginfo.dat
+printf '%s\r\n' "$bandtwo" >> $fullfilepath/tilinginfo.dat
+printf '%s\r\n' "$bandthree" >> $fullfilepath/tilinginfo.dat
+printf '%s\r\n' "$bandfour" >> $fullfilepath/tilinginfo.dat;
+printf '%s\r\n' "$maxz" >> $fullfilepath/tilinginfo.dat;
+printf '%s\r\n' "$calculatedgsd" >> $fullfilepath/tilinginfo.dat;
+printf '%s\r\n' "$epsgproj" >> $fullfilepath/tilinginfo.dat;
+printf '%s\r\n' "$modifiedepsg" >> $fullfilepath/tilinginfo.dat;
+printf '%s\r\n' "" >> $fullfilepath/tilinginfo.dat
+printf '%s\r\n' "$fullfilepath" >> $fullfilepath/tilinginfo.dat
+fi
+}
+
+
+####
+#
+# checkformove
+# Checks to see if you want to move the files or not.
+#
+####
+
+checkformove() {
+echo ""
+echo ""
+echo "Sometimes, a user may choose not to move their files at this time."
+echo "If you choose NOT to move files, we will simply display the jobid and exit."
+echo ""
+echo "      (Y or y) YES"
+echo "      (N or n)  NO"
+echo "      (Q or q) EXIT"
+echo ""
+read -p "Would you like to copy your files to the remote location?  (Y/N) > " -n1
+echo ""
+echo ""
+case $REPLY in
+        Y) movetoremote;;
+        y) movetoremote;;
+        N) nomovetoremote;;
+        n) nomovetoremote;;
+        Q) exit;;
+        q) exit;;
+        *) echo "Invalid option.  Please try again.";
+                sleep 1;
+                checkformove;;
+esac
+}
+
+
+####
+#
+# nomovetoremote
+# Don't move files, just give out the jobID and connect.
+#
+####
+
+nomovetoremote() {
+echo "You have chosen not to move your files to the remote server."
+echo "You can still go on to the next step by pressing a key."
+echo "Then you may run a job by typing:   job $jobid"
+echo ""
+echo "job $jobid"
+echo ""
+echo ""
+pause;
+ssh be1
+exit
+}
+
+
+
+####
+#
+# movetoremote()
+# Moves the files from the local device to BE1 at the ACES datacenter
+#
+####
+
+movetoremote() {
+clear
+echo "Your data is being moved to the remote location.  This may take some time."
+echo "Your data is being moved to /var/www/mapproxy/jobs/$jobid on the remote"
+echo "server.  Please note your Job ID, $jobid in the event that you need to "
+echo "come back to the tiling process later."
+echo ""
+rsync -ua ssh --progress $origfilepath/* eod@be1:/var/www/mapproxy/jobs/$jobid
+echo ""
+echo ""
+echo "This copy job is complete.  If you're still here watching patiently,"
+echo "then you can go on to the next step by pressing a key."
+echo ""
+echo ""
+echo "job $jobid"
+echo ""
+echo ""
+pause;
+ssh be1
+exit
+}
+
+getbasedir
