@@ -1,0 +1,142 @@
+#!/bin/bash
+
+#####
+# This script is responsible for reading in data from rebelbase.
+#
+# It is called remotely through SSH, and simply looks for the
+# jobid directory in /var/www/mapproxy/jobs and then reads the
+# settings from the tilinginfo.dat file
+#####
+jobid=$1
+
+#totalbands=`sed -n '2p' /var/www/mapproxy/jobs/$jobid/tilinginfo.dat`
+#bandone=`sed -n '3p' /var/www/mapproxy/jobs/$jobid/tilinginfo.dat`
+#bandtwo=`sed -n '4p' /var/www/mapproxy/jobs/$jobid/tilinginfo.dat`
+#bandthree=`sed -n '5p' /var/www/mapproxy/jobs/$jobid/tilinginfo.dat`
+#bandfour=`sed -n '6p' /var/www/mapproxy/jobs/$jobid/tilinginfo.dat`
+#maxz=`sed -n '7p' /var/www/mapproxy/jobs/$jobid/tilinginfo.dat`
+#calculatedgsd=`sed -n '8p' /var/www/mapproxy/jobs/$jobid/tilinginfo.dat`
+#projection=`sed -n '9p' /var/www/mapproxy/jobs/$jobid/tilinginfo.dat`
+#modifiedepsg=`sed -n '10p' /var/www/mapproxy/jobs/$jobid/tilinginfo.dat`
+
+pause(){
+        read -p "Hit [ENTER] to continue..."
+}
+
+
+
+
+if [ "$1" == "" ]; then
+        clear
+        echo "You have not specified a JobID.  A JobID is required in order to continue."
+        echo ""
+        echo "Usage:   job 1442516347"
+        echo ""
+        echo "This program will now exit."
+        echo ""
+        pause
+        exit
+else
+        echo "JobID: $1"
+fi
+
+
+
+hacf() {
+        echo "Halt and catch fire.  Debug."
+}
+
+if [ -e /var/www/mapproxy/jobs/$jobid/RGB/tilinginfo.dat ]; then
+        rgbstatus="X"
+else
+        rgbstatus=" "
+fi
+
+if [ -e /var/www/mapproxy/jobs/$jobid/rNDVI/tilinginfo.dat ]; then
+        rndvistatus="X"
+else
+        rndvistatus=" "
+fi
+
+if [ -e /var/www/mapproxy/jobs/$jobid/gNDVI/tilinginfo.dat ]; then
+        gndvistatus="X"
+else
+        gndvistatus=" "
+fi
+
+if [ -e /var/www/mapproxy/jobs/$jobid/Thermal/tilinginfo.dat ]; then
+        thermalstatus="X"
+else
+        thermalstatus=" "
+fi
+
+showmenu() {
+clear
+echo "===================================================="
+echo "#            Earth on Demand Job Info"
+echo "===================================================="
+echo "|                                "
+echo "| tilininginfo.dat files identified for this jobID:"
+echo "|"
+echo "|   [$rgbstatus] RGB    [$rndvistatus] rNDVI    [$gndvistatus] gNDVI    [$thermalstatus] Thermal"
+echo "|"
+echo "|           Information File Management"
+echo "| ================================================"
+echo "|"
+echo "|       [H] Remove hints file"
+echo "|"
+echo "===================================================="
+echo ""
+
+read -p "Press H to remove the hints file (then continue)  or any other key to continue. (H/?) > " -n1
+
+case $REPLY in
+        H )
+
+        if [ -e /var/www/mapproxy/jobs/$jobid/hints.txt ]; then
+                rm -r /var/www/mapproxy/jobs/$jobid/hints.txt
+                echo ""
+                echo ""
+                echo "Hints file removed."
+                echo ""
+                sleep 2
+                scenarios $jobid
+          else
+                echo ""
+                echo ""
+                echo "No hints file to remove.  Continuing..."
+                echo ""
+                sleep 2
+                senarios $jobid
+          fi
+        ;;
+
+        h )
+
+        if [ -e /var/www/mapproxy/jobs/$jobid/hints.txt ]; then
+                rm -r /var/www/mapproxy/jobs/$jobid/hints.txt;
+                echo ""
+                echo ""
+                echo "Hints file removed."
+                echo ""
+                sleep 2
+                scenarios $jobid
+          else
+                echo ""
+                echo ""
+                echo "No hints file to remove.  Continuing..."
+                echo ""
+                sleep 2
+                scenarios $jobid
+          fi
+        ;;
+
+        * )
+
+        scenarios $jobid
+        ;;
+esac
+
+}
+
+showmenu
