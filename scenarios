@@ -1,0 +1,700 @@
+#!/bin/bash
+jobid=$1
+RGBSwitches="-b 1 -b 2 -b 3"
+RGBMosaic1="-of vrt -cutline"
+gdalwarpb="-crop_to_cutline -dstalpha -multi"
+CIRSwitches="-b 4 -b 2 -b 1"
+EPSGSwitches=""
+
+####
+#
+# Flush variables
+#
+####
+
+flush() {
+maxz=""
+projection=""
+modifiedepsg=""
+client=""
+PROJECTYEAR=""
+SITENAME=""
+inputfiletype=""
+hintsloaded=""
+gNDVI=""
+rNDVI=""
+Termal=""
+RGB=""
+IR=""
+PROJECTYEAR=""
+PROJECTSEASON=""
+SITENAME=""
+EPSGSwitches=""
+}
+
+
+pause(){
+        read -p "Hit [ENTER] to continue..."
+}
+
+
+
+loadhints() {
+client=`sed -n '1p' /var/www/mapproxy/jobs/$jobid/hints.txt`
+PROJECTYEAR=`sed -n '2p' /var/www/mapproxy/jobs/$jobid/hints.txt`
+PROJECTSEASON=`sed -n '3p' /var/www/mapproxy/jobs/$jobid/hints.txt`
+SITENAME=`sed -n '4p' /var/www/mapproxy/jobs/$jobid/hints.txt`
+inputfiletype=`sed -n '5p' /var/www/mapproxy/jobs/$jobid/hints.txt`
+hintsloaded="Y"
+}
+
+
+printscenariomenu() {
+clear
+flush
+echo "          =========================================="
+echo "          |"
+echo "          |  Choose the product you want to tile   "
+echo "          |"
+echo "          =========================================="
+echo "          |"
+echo "          | [1] RGB"
+echo "          | [2] CIR"
+echo "          | [3] rNDVI"
+echo "          | [4] gNDVI"
+echo "          | [5] Thermal"
+echo "          |"
+echo "          | [Q] Quit"
+echo "          |"
+echo "          =========================================="
+echo ""
+scenariomenu;
+}
+
+scenariomenu() {
+read -p "Please make a selection: " -n1
+case $REPLY in
+        1) echo "RGB...";
+                printrgbproductmenu;;
+        2) echo "CIR...";
+                if [ -e /var/www/mapproxy/jobs/$jobid/hints.txt ]; then
+                        loadhints
+                else
+                getdata;
+                fi
+                producecir;;
+        3) echo "rNDVI...";
+                printrndviproductmenu;;
+        4) echo "gNDVI...";
+                printgndviproductmenu;;
+        5) echo "Thermal...";
+                Thermal=1
+                if [ -e /var/www/mapproxy/jobs/$jobid/hints.txt ]; then
+                        loadhints;
+                else
+                        getdata;
+                fi
+                producergba;;
+        Qq) exit;;
+esac
+}
+
+printrgbproductmenu() {
+clear
+echo "          =========================================="
+echo "          |"
+echo "          |  Choose your input file type   "
+echo "          |"
+echo "          =========================================="
+echo "          |"
+echo "          | [1] RGBA"
+echo "          | [2] RGB"
+echo "          | [3] RGBIR"
+echo "          |"
+echo "          | [Q] Quit"
+echo "          |"
+echo "          =========================================="
+echo ""
+rgbproductmenu
+}
+
+rgbproductmenu() {
+read -p "Please make a selection: " -n1
+case $REPLY in
+        1) echo "RGBA...";
+                RGB=1;
+                if [ -e /var/www/mapproxy/jobs/$jobid/hints.txt ]; then
+                        loadhints;
+                else
+                        getdata;
+                fi
+                producergba;;
+        2) echo "RGB...";
+                if [ -e /var/www/mapproxy/jobs/$jobid/hints.txt ]; then
+                        loadhints;
+                else
+                        getdata;
+                fi
+                producergb;;
+        3) echo "RGBIR...";
+                IR=1;
+                if [ -e /var/www/mapproxy/jobs/$jobid/hints.txt ]; then
+                        loadhints;
+                else
+                        getdata;
+                fi
+                producergb;;
+        *) echo "You need to pick a valid entry....";
+                sleep 2;
+                printrgbproductmenu;;
+        Q) echo "Exiting...";
+                exit;;
+esac
+}
+
+printrndviproductmenu() {
+clear
+echo "          =========================================="
+echo "          |"
+echo "          |  Choose the product to produce   "
+echo "          |"
+echo "          =========================================="
+echo "          |"
+echo "          | [1] RGBA"
+echo "          | [2] 1-Band"
+echo "          |"
+echo "          | [Q] Quit"
+echo "          |"
+echo "          =========================================="
+echo ""
+rndviproductmenu
+}
+
+rndviproductmenu() {
+read -p "Please make a selection: " -n1
+case $REPLY in
+        1) echo "RGBA...";
+                rNDVI=1;
+                if [ -e /var/www/mapproxy/jobs/$jobid/hints.txt ]; then
+                        loadhints;
+                else
+                        getdata;
+                fi
+                producergba;;
+        2) echo "1-Band...";
+                rNDVI=1;
+                if [ -e /var/www/mapproxy/jobs/$jobid/hints.txt ]; then
+                        loadhints;
+                else
+                        getdata;
+                fi
+                produceoneband;;
+        *) echo "Please make a proper selection...";
+                sleep 2;
+                printrndviproductmenu;;
+        Q) exit;;
+esac
+}
+
+
+printgndviproductmenu() {
+clear
+echo "          =========================================="
+echo "          |"
+echo "          |  Choose the product to produce   "
+echo "          |"
+echo "          =========================================="
+echo "          |"
+echo "          | [1] RGBA"
+echo "          | [2] 1-Band"
+echo "          |"
+echo "          | [Q] Quit"
+echo "          |"
+echo "          =========================================="
+echo ""
+gndviproductmenu
+}
+
+
+gndviproductmenu() {
+read -p "Please make a selection: " -n1
+case $REPLY in
+        1) echo "RGBA...";
+                gNDVI=1;
+                if [ -e /var/www/mapproxy/jobs/$jobid/hints.txt ]; then
+                        loadhints;
+                else
+                        getdata;
+                fi
+                producergba;;
+        2) echo "1-Band...";
+                gNDVI=1;
+                if [ -e /var/www/mapproxy/jobs/$jobid/hints.txt ]; then
+                        loadhints;
+                else
+                        getdata;
+                fi
+                produceoneband;;
+        *) echo "Please make a proper selection...";
+                sleep 2;
+                printrndviproductmenu;;
+        Q) exit;;
+esac
+}
+
+
+
+
+get-client() {
+clear
+echo "JobID: $jobid"
+echo ""
+echo "Specify the name of the client.  The client name will be appended to /var/www/mapproxy/data_client"
+echo ""
+echo "Example:  fn for Farm Nutrients will use or create the directory /var/www/mapproxy/data_fn"
+echo ""
+echo "If the directory already exists, it will be used.  If the directory does NOT exist, it will be created."
+echo ""
+echo -n "Please enter the client name > "
+read client
+if [ "$client" == "Q" ]; then
+        echo "Exiting this module... chicken."
+        sleep 1
+        exit
+elif [ "$client" == "q" ]; then
+        echo "Exiting this module... chicken."
+        sleep 1
+        exit
+elif [ "$client" == "" ]; then
+        echo "Please input something real."
+        sleep 3
+        get-client;
+else
+echo "$client" >> /var/www/mapproxy/jobs/$jobid/hints.txt
+        check-client-dir;
+fi
+}
+
+check-client-dir() {
+if [ -d "/var/www/mapproxy/tiles/$client" ]; then
+        echo ""
+        echo "Directory /var/www/mapproxy/tiles/$client exists.  Moving on."
+        get-project-year;
+else
+        read -p "Directory /var/www/mapproxy/tiles/$client does not exist.  Create it? (Y/N) "  -n1
+case $REPLY in
+        Y) printf "\nCreating directory /var/www/mapproxy/tiles/$client...\n";
+                sudo mkdir -p /var/www/mapproxy/tiles/$client;
+                get-project-year;;
+        y) printf "\nCreating directory /var/www/mapproxy/tiles/$client...\n";
+                sudo mkdir -p /var/www/mapproxy/tiles/$client;
+                get-project-year;;
+        Q) printf "\nExiting...\n";
+                pause;
+                exit;;
+        q) printf "\nExiting...\n";
+                pause;
+                exit;;
+        *) echo "Hey!  Are you crazy?  It's Y, N, or Q!"
+                check-client-dir;;
+esac
+fi
+}
+
+get-project-year() {
+echo "Please input the project year.  Please enter all four digits of the year."
+echo ""
+echo "Example:  2015"
+echo ""
+echo "Type a year, then hit ENTER"
+echo ""
+read -p "Please enter the project year (example: 2015) > " -r
+PROJECTYEAR=$REPLY
+if [ "$PROJECTYEAR" == "" ]; then
+        echo "Please enter a 4-digit year (example: 2015)"
+        echo ""
+        sleep 3
+        get-project-year;
+else
+        echo ""
+fi
+echo "$PROJECTYEAR" >> /var/www/mapproxy/jobs/$jobid/hints.txt
+        get-season;
+}
+
+
+get-season() {
+echo "Please input the repeat flight number."
+echo ""
+echo "This is the number of times this particular data has been flown."
+echo ""
+echo "First flight will be flight 1, next flight will be flight 2, etc."
+echo ""
+echo "I will check to make sure that the client and repeat directories have been created."
+echo ""
+echo "NOTE NOTE NOTE NOTE:  You will need to pad your flight number with a 0 if the reflight"
+echo "is less than 10.          Example:  04"
+echo ""
+echo ""
+read -p "Please enter the NUMERIC repeat flight number and then hit ENTER > "
+PROJECTSEASON=$REPLY
+if [ "$PROJECTSEASON" == "" ]; then
+        echo "You must select a repeat number.  Your entry was empty."
+        echo ""
+        sleep 3
+        get-season;
+else
+        echo "$PROJECTSEASON" >> /var/www/mapproxy/jobs/$jobid/hints.txt
+        echo ""
+fi
+
+printf  "\nTesting to see if /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON exists\n"
+if [ -d "/var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/" ]; then
+        echo ""
+        echo "Directory exists... continuing..."
+        echo ""
+        get-site-name;
+else
+        echo ""
+        read -p "Directory does not exist... create? (Y/N) " -n1
+        echo ""
+case $REPLY in
+        Y) sudo mkdir -p /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/;
+                get-site-name;;
+        y) sudo mkdir -p /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/;
+                get-site-name;;
+        N) echo "Exiting...";
+                exit;;
+        n) echo "Exiting...";
+                exit;;
+        *) echo "You must pick Y or N";
+                get-season;;
+esac
+
+fi
+
+}
+
+get-site-name() {
+clear
+echo "The SITE NAME attribute determines which dataset we should process for $client."
+echo "You should already have an idea of the site name, as it is usually in the file"
+echo "name for the original TIF / JPG file."
+echo ""
+read -p "Please enter a site name : "
+SITENAME=$REPLY
+if [ "$SITENAME" == "" ]; then
+        echo "A site name must be entered to continue."
+        echo ""
+        sleep 2
+        get-site-name;
+else
+        echo "$SITENAME" >> /var/www/mapproxy/jobs/$jobid/hints.txt
+        echo ""
+fi
+
+
+printf "\nYou have chosen $SITENAME\n"
+echo "We are now going to check that the entire directory exists....."
+
+
+if [ -d "/var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/" ]; then
+        echo "Directory exists... continuing..."
+        express-input-file-type;
+
+else
+
+read -p "This directory does not exist... create? (Y/N) " -n1
+case $REPLY in
+        Y) sudo mkdir -p /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME;
+                express-input-file-type;;
+        y) sudo mkdir -p /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME;
+                express-input-file-type;;
+        N) echo "Exiting...";
+                exit;;
+        n) echo "Exiting...";
+                exit;;
+        *) echo "Valid choices are Y or N";
+                get-site-name;;
+esac
+fi
+}
+
+express-input-file-type() {
+clear
+echo "Input File Type"
+echo ""
+echo ""
+echo -e "\e[92mPlease tell me the input file type (tif, jpg, gif) USE LOWERCASE!\e[0m"
+read inputfiletype
+if [ "$inputfiletype" == "Q" ]; then
+        echo "Exiting this module... chicken."
+        sleep 1
+        pause;
+        exit
+elif [ "$inputfiletype" == "q" ]; then
+        echo "Exiting this module... chicken."
+        sleep 1
+        pause;
+        exit
+else
+        echo "$inputfiletype" >> /var/www/mapproxy/jobs/$jobid/hints.txt
+       echo ""
+fi
+}
+
+getdata() {
+get-client
+}
+
+setmodifiedepsg() {
+if [ "$modifiedepsg" = "Y" ] ; then
+        EPSGSwitches="-allow_projection_difference -a_srs EPSG:$projection"
+else
+        EPSGSwitches=""
+fi
+}
+
+
+
+producergba() {
+clear
+if [ "$RGB" = "1" ]; then
+        sudo dos2unix /var/www/mapproxy/jobs/$jobid/RGB/tilinginfo.dat
+        maxz=`sudo sed -n '7p' /var/www/mapproxy/jobs/$jobid/RGB/tilinginfo.dat`
+        projection=`sudo sed -n '9p' /var/www/mapproxy/jobs/$jobid/RGB/tilinginfo.dat`
+        modifiedepsg=`sudo sed -n '10p' /var/www/mapproxy/jobs/$jobid/RGB/tilinginfo.dat`
+        setmodifiedepsg
+        cd /var/www/mapproxy
+        echo -e "Creating RGB Mosaic using command:"
+        echo -e "sudo gdalbuildvrt $EPSGSwitches /var/www/mapproxy/jobs/$jobid/rgb.vrt /var/www/mapproxy/jobs/$jobid/RGB/*.$inputfiletype"
+        echo -e ""
+        sudo gdalbuildvrt $EPSGSwitches /var/www/mapproxy/jobs/$jobid/rgb.vrt /var/www/mapproxy/jobs/$jobid/RGB/*.$inputfiletype
+
+        echo -e "Tiling to MaxZ of: $maxz...."
+        sudo mkdir -p /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/rgb
+        printf "maptiler -o /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/rgb -f hybrid jpg png8a -zoom 0 $maxz -tms /var/www/mapproxy/jobs/$jobid/rgb.vrt"
+        echo ""
+        sudo maptiler -o /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/rgb -f hybrid jpg png8a -zoom 0 $maxz -tms /var/www/mapproxy/jobs/$jobid/rgb.vrt
+        history
+        pause
+        printscenariomenu
+else
+        sleep .01
+fi
+
+if [ "$rNDVI" = "1" ]; then
+        sudo dos2unix /var/www/mapproxy/jobs/$jobid/rNDVI/tilinginfo.dat
+        maxz=`sed -n '7p' /var/www/mapproxy/jobs/$jobid/rNDVI/tilinginfo.dat`
+        projection=`sed -n '9p' /var/www/mapproxy/jobs/$jobid/rNDVI/tilinginfo.dat`
+        modifiedepsg=`sed -n '10p' /var/www/mapproxy/jobs/$jobid/rNDVI/tilinginfo.dat`
+        setmodifiedepsg
+        cd /var/www/mapproxy
+        echo -e "Creating rNDVI Mosaic using command:"
+        echo -e "sudo gdalbuildvrt $EPSGSwitches /var/www/mapproxy/jobs/$jobid/rndvi.vrt /var/www/mapproxy/jobs/$jobid/rNDVI/*.$inputfiletype"
+        echo -e ""
+        sudo gdalbuildvrt $EPSGSwitches /var/www/mapproxy/jobs/$jobid/rndvi.vrt /var/www/mapproxy/jobs/$jobid/rNDVI/*.$inputfiletype
+        echo -e "Tiling..."
+        sudo mkdir -p /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/rndvi
+        printf "sudo maptiler -o /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/rndvi -f hybrid jpg png8a -zoom 0 $maxz -tms /var/www/mapproxy/jobs/$jobid/rndvi.vrt"
+        echo ""
+        sudo maptiler -o /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/rndvi -f hybrid jpg png8a -zoom 0 $maxz -tms /var/www/mapproxy/jobs/$jobid/rndvi.vrt
+        pause
+        printscenariomenu
+else
+        sleep .01
+fi
+
+if [ "$gNDVI" = "1" ]; then
+        sudo dos2unix /var/www/mapproxy/jobs/$jobid/gNDVI/tilinginfo.dat
+        maxz=`sed -n '7p' /var/www/mapproxy/jobs/$jobid/gNDVI/tilinginfo.dat`
+        projection=`sed -n '9p' /var/www/mapproxy/jobs/$jobid/gNDVI/tilinginfo.dat`
+        modifiedepsg=`sed -n '10p' /var/www/mapproxy/jobs/$jobid/gNDVI/tilinginfo.dat`
+        setmodifiedepsg
+        cd /var/www/mapproxy
+        echo -e "Creating gNDVI Mosaic using command:"
+        echo -e "sudo gdalbuildvrt $EPSGSwitches /var/www/mapproxy/jobs/$jobid/gndvi.vrt /var/www/mapproxy/jobs/$jobid/gNDVI/*.$inputfiletype"
+        echo -e ""
+        sudo gdalbuildvrt $EPSGSwitches /var/www/mapproxy/jobs/$jobid/gndvi.vrt /var/www/mapproxy/jobs/$jobid/gNDVI/*.$inputfiletype
+        echo -e "Tiling..."
+        sudo mkdir -p /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/gndvi
+        printf "sudo maptiler -o /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/gndvi -f hybrid jpg png8a -zoom 0 $maxz -tms /var/www/mapproxy/jobs/$jobid/gndvi.vrt"
+        echo ""
+        sudo maptiler -o /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/gndvi -f hybrid jpg png8a -zoom 0 $maxz -tms /var/www/mapproxy/jobs/$jobid/gndvi.vrt
+        pause
+        printscenariomenu
+else
+        sleep .01
+fi
+
+if [ "$Thermal" = "1" ]; then
+        sudo dos2unix /var/www/mapproxy/jobs/$jobid/Thermal/tilinginfo.dat
+        maxz=`sed -n '7p' /var/www/mapproxy/jobs/$jobid/Thermal/tilinginfo.dat`
+        projection=`sed -n '9p' /var/www/mapproxy/jobs/$jobid/Thermal/tilinginfo.dat`
+        modifiedepsg=`sed -n '10p' /var/www/mapproxy/jobs/$jobid/Thermal/tilinginfo.dat`
+        setmodifiedepsg
+        cd /var/www/mapproxy
+        echo -e "Creating Thermal Mosaic using command:"
+        echo -e "sudo gdalbuildvrt $EPSGSwitches /var/www/mapproxy/jobs/$jobid/thermal.vrt /var/www/mapproxy/jobs/$jobid/Thermal/*.$inputfiletype"
+        echo -e ""
+        sudo gdalbuildvrt $EPSGSwitches /var/www/mapproxy/jobs/$jobid/thermal.vrt /var/www/mapproxy/jobs/$jobid/Thermal/*.$inputfiletype
+        echo -e "Tiling..."
+        sudo mkdir -p /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/thermal
+        printf "sudo maptiler -o /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/thermal -f hybrid jpg png8a -zoom 0 $maxz -tms /var/www/mapproxy/jobs/$jobid/thermal.vrt"
+        echo ""
+        sudo maptiler -o /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/thermal -f hybrid jpg png8a -zoom 0 $maxz -tms /var/www/mapproxy/jobs/$jobid/thermal.vrt
+        pause
+        printscenariomenu
+else
+        sleep .01
+fi
+
+exit
+}
+
+
+producergb() {
+clear
+if [ "$IR" = "1" ]; then
+sudo dos2unix /var/www/mapproxy/jobs/$jobid/RGB/tilinginfo.dat
+maxz=`sudo sed -n '7p' /var/www/mapproxy/jobs/$jobid/RGB/tilinginfo.dat`
+projection=`sudo sed -n '9p' /var/www/mapproxy/jobs/$jobid/RGB/tilinginfo.dat`
+modifiedepsg=`sudo sed -n '10p' /var/www/mapproxy/jobs/$jobid/RGB/tilinginfo.dat`
+        setmodifiedepsg
+        checkshapefile
+        cd /var/www/mapproxy
+        echo -e "Creating RGB-IR Mosaic using command:"
+        echo -e "sudo gdalbuildvrt $RGBSwitches $EPSGSwitches /var/www/mapproxy/jobs/$jobid/rgb.vrt /var/www/mapproxy/jobs/$jobid/RGB/*.$inputfiletype"
+        echo -e ""
+        sudo gdalbuildvrt $RGBSwitches $EPSGSwitches /var/www/mapproxy/jobs/$jobid/rgb.vrt /var/www/mapproxy/jobs/$jobid/RGB/*.$inputfiletype
+
+        echo ""
+        echo ""
+        echo "Cropping..."
+        echo "sudo gdalwarp $RGBMosaic1 /var/www/mapproxy/jobs/$jobid/shp/*.shp $gdalwarpb /var/www/mapproxy/jobs/$jobid/rgb.vrt /var/www/mapproxy/jobs/$jobid/rgbtemp.vrt"
+        sudo gdalwarp $RGBMosaic1 /var/www/mapproxy/jobs/$jobid/shp/*.shp $gdalwarpb /var/www/mapproxy/jobs/$jobid/rgb.vrt /var/www/mapproxy/jobs/$jobid/rgbtemp.vrt
+
+        echo -e "Tiling..."
+        sudo mkdir -p /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/rgb
+        printf "sudo maptiler -o /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/rgb -f hybrid jpg png8a -zoom 0 $maxz -tms /var/www/mapproxy/jobs/$jobid/rgbtemp.vrt"
+        echo ""
+        sudo maptiler -o /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/rgb -f hybrid jpg png8a -zoom 0 $maxz -tms /var/www/mapproxy/jobs/$jobid/rgbtemp.vrt
+        pause
+        printscenariomenu
+else
+        sudo dos2unix /var/www/mapproxy/jobs/$jobid/RGB/tilinginfo.dat
+        maxz=`sudo sed -n '7p' /var/www/mapproxy/jobs/$jobid/RGB/tilinginfo.dat`
+        projection=`sudo sed -n '9p' /var/www/mapproxy/jobs/$jobid/RGB/tilinginfo.dat`
+        modifiedepsg=`sudo sed -n '10p' /var/www/mapproxy/jobs/$jobid/RGB/tilinginfo.dat`
+        setmodifiedepsg
+        checkshapefile
+        cd /var/www/mapproxy
+        echo -e "Creating RGB Mosaic using command:"
+        echo -e "sudo gdalbuildvrt $EPSGSwitches /var/www/mapproxy/jobs/$jobid/rgb.vrt /var/www/mapproxy/jobs/$jobid/RGB/*.$inputfiletype"
+        echo -e ""
+        sudo gdalbuildvrt $EPSGSwitches /var/www/mapproxy/jobs/$jobid/rgb.vrt /var/www/mapproxy/jobs/$jobid/RGB/*.$inputfiletype
+
+        echo "Cropping..."
+        echo "sudo gdalwarp $RGBMosaic1 /var/www/mapproxy/jobs/$jobid/shp/*.shp $gdalwarpb /var/www/mapproxy/jobs/$jobid/rgb.vrt /var/www/mapproxy/jobs/$jobid/rgbtemp.vrt"
+        sudo gdalwarp $RGBMosaic1 /var/www/mapproxy/jobs/$jobid/shp/*.shp $gdalwarpb /var/www/mapproxy/jobs/$jobid/rgb.vrt /var/www/mapproxy/jobs/$jobid/rgbtemp.vrt
+
+        echo -e "Tiling..."
+        sudo mkdir -p /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/rgb
+        printf "sudo maptiler -o /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/rgb -f hybrid jpg png8a -zoom 0 $maxz -tms /var/www/mapproxy/jobs/$jobid/rgbtemp.vrt"
+        echo ""
+        sudo maptiler -o /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/rgb -f hybrid jpg png8a -zoom 0 $maxz -tms /var/www/mapproxy/jobs/$jobid/rgbtemp.vrt
+        pause
+        printscenariomenu
+fi
+}
+
+producecir() {
+clear
+sudo dos2unix /var/www/mapproxy/jobs/$jobid/RGB/tilinginfo.dat
+maxz=`sed -n '7p' /var/www/mapproxy/jobs/$jobid/RGB/tilinginfo.dat`
+projection=`sed -n '9p' /var/www/mapproxy/jobs/$jobid/RGB/tilinginfo.dat`
+modifiedepsg=`sed -n '10p' /var/www/mapproxy/jobs/$jobid/RGB/tilinginfo.dat`
+setmodifiedepsg
+cd /var/www/mapproxy
+checkshapefile
+RGBSwitches="-b 4 -b 2 -b 1"
+echo -e "Creating CIR Mosaic using command:"
+echo -e "sudo gdalbuildvrt $RGBSwitches $EPSGSwitches /var/www/mapproxy/jobs/$jobid/cir.vrt /var/www/mapproxy/jobs/$jobid/RGB/*.$inputfiletype"
+sudo gdalbuildvrt $RGBSwitches $EPSGSwitches /var/www/mapproxy/jobs/$jobid/cir.vrt /var/www/mapproxy/jobs/$jobid/RGB/*.$inputfiletype
+echo -e "Cropping..."
+echo -e "sudo gdalwarp $RGBMosaic1 /var/www/mapproxy/jobs/$jobid/shp/*.shp $gdalwarpb /var/www/mapproxy/jobs/$jobid/cir.vrt /var/www/mapproxy/jobs/$jobid/cirtemp.vrt"
+sudo gdalwarp $RGBMosaic1 /var/www/mapproxy/jobs/$jobid/shp/*.shp $gdalwarpb /var/www/mapproxy/jobs/$jobid/cir.vrt /var/www/mapproxy/jobs/$jobid/cirtemp.vrt
+echo -e "Tiling..."
+printf "sudo maptiler -o /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/cir -f hybrid jpg png8a -zoom 0 $maxz -tms /var/www/mapproxy/jobs/$jobid/cirtemp.vrt"
+echo ""
+sudo maptiler -o /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/cir -f hybrid jpg png8a -zoom 0 $maxz -tms /var/www/mapproxy/jobs/$jobid/cirtemp.vrt
+pause
+printscenariomenu
+}
+
+
+produceoneband() {
+if [ "$rNDVI" = "1" ]; then
+        sudo dos2unix /var/www/mapproxy/jobs/$jobid/rNDVI/tilinginfo.dat
+        maxz=`sed -n '7p' /var/www/mapproxy/jobs/$jobid/rNDVI/tilinginfo.dat`
+        projection=`sed -n '9p' /var/www/mapproxy/jobs/$jobid/rNDVI/tilinginfo.dat`
+        modifiedepsg=`sed -n '10p' /var/www/mapproxy/jobs/$jobid/rNDVI/tilinginfo.dat`
+        checkshapefile
+        setmodifiedepsg
+        cd /var/www/mapproxy
+        echo "sudo gdalbuildvrt $EPSGSwitches /var/www/mapproxy/jobs/$jobid/rndvi.vrt /var/www/mapproxy/jobs/$jobid/rNDVI/*.$inputfiletype"
+        sudo gdalbuildvrt $EPSGSwitches /var/www/mapproxy/jobs/$jobid/rndvi.vrt /var/www/mapproxy/jobs/$jobid/rNDVI/*.$inputfiletype
+        echo "sudo gdal_translate -of vrt -expand rgb /var/www/mapproxy/jobs/$jobid/rndvi.vrt /var/www/mapproxy/jobs/$jobid/rndvitr.vrt"
+        sudo gdal_translate -of vrt -expand rgb /var/www/mapproxy/jobs/$jobid/rndvi.vrt /var/www/mapproxy/jobs/$jobid/rndvitr.vrt
+        echo "sudo gdalwarp $RGBMosaic1 /var/www/mapproxy/jobs/$jobid/shp/*.shp $gdalwarpb /var/www/mapproxy/jobs/$jobid/rndvitr.vrt /var/www/mapproxy/jobs/$jobid/rndvitemp.vrt"
+        sudo gdalwarp $RGBMosaic1 /var/www/mapproxy/jobs/$jobid/shp/*.shp $gdalwarpb /var/www/mapproxy/jobs/$jobid/rndvitr.vrt /var/www/mapproxy/jobs/$jobid/rndvitemp.vrt
+        printf "sudo maptiler -o /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/rndvi -f hybrid jpg png8a -zoom 0 $maxz -tms /var/www/mapproxy/jobs/$jobid/rndvitemp.vrt"
+        echo ""
+        sudo maptiler -o /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/rndvi -f hybrid jpg png8a -zoom 0 $maxz -tms /var/www/mapproxy/jobs/$jobid/rndvitemp.vrt
+        pause
+        printscenariomenu
+else
+        sleep .01
+fi
+
+if [ "$gNDVI" = "1" ]; then
+        sudo dos2unix /var/www/mapproxy/jobs/$jobid/gNDVI/tilinginfo.dat
+        maxz=`sed -n '7p' /var/www/mapproxy/jobs/$jobid/gNDVI/tilinginfo.dat`
+        projection=`sed -n '9p' /var/www/mapproxy/jobs/$jobid/gNDVI/tilinginfo.dat`
+        modifiedepsg=`sed -n '10p' /var/www/mapproxy/jobs/$jobid/gNDVI/tilinginfo.dat`
+        checkshapefile
+        setmodifiedepsg
+        cd /var/www/mapproxy
+        echo "sudo gdalbuildvrt $EPSGSwitches /var/www/mapproxy/jobs/$jobid/gndvi.vrt /var/www/mapproxy/jobs/$jobid/gNDVI/*.$inputfiletype"
+        sudo gdalbuildvrt $EPSGSwitches /var/www/mapproxy/jobs/$jobid/gndvi.vrt /var/www/mapproxy/jobs/$jobid/gNDVI/*.$inputfiletype
+        echo "sudo gdal_translate -of vrt -expand rgb /var/www/mapproxy/jobs/$jobid/gndvi.vrt /var/www/mapproxy/jobs/$jobid/gndvitr.vrt"
+        sudo gdal_translate -of vrt -expand rgb /var/www/mapproxy/jobs/$jobid/gndvi.vrt /var/www/mapproxy/jobs/$jobid/gndvitr.vrt
+        echo "sudo gdalwarp $RGBMosaic1 /var/www/mapproxy/jobs/$jobid/shp/*.shp $gdalwarpb /var/www/mapproxy/jobs/$jobid/gndvitr.vrt /var/www/mapproxy/jobs/$jobid/gndvitemp.vrt"
+        sudo gdalwarp $RGBMosaic1 /var/www/mapproxy/jobs/$jobid/shp/*.shp $gdalwarpb /var/www/mapproxy/jobs/$jobid/gndvitr.vrt /var/www/mapproxy/jobs/$jobid/gndvitemp.vrt
+        printf "sudo maptiler -o /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/gndvi -f hybrid jpg png8a -zoom 0 $maxz -tms /var/www/mapproxy/jobs/$jobid/gndvitemp.vrt"
+        echo ""
+        sudo maptiler -o /var/www/mapproxy/tiles/$client/$PROJECTYEAR/F$PROJECTSEASON/$SITENAME/gndvi -f hybrid jpg png8a -zoom 0 $maxz -tms /var/www/mapproxy/jobs/$jobid/gndvitemp.vrt
+        pause
+        printscenariomenu
+else
+        sleep .01
+fi
+
+
+}
+
+
+checkshapefile() {
+echo "Performing test to see if a shapefile is present..."
+if [ -e /var/www/mapproxy/jobs/$jobid/shp/*.shp ]; then
+        echo "Shapefile Found.  Continuing tests...."
+else
+        echo "Shapefile NOT Found.  You must fix this to continue."
+        pause;
+        exit
+fi
+echo ""
+}
+
+
+printscenariomenu
